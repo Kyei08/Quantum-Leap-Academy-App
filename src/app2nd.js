@@ -38,16 +38,11 @@ const App = () => {
     const [teacherPicks, setTeacherPicks] = useState([]); // Dynamically generated teacher's picks
     const [assignmentContent, setAssignmentContent] = useState(null); // Dynamically generated assignment content
 
-    // --- NEW Assignment State ---
-    const [currentAssignmentSectionIndex, setCurrentAssignmentSectionIndex] = useState(0);
-    const [assignmentResponses, setAssignmentResponses] = useState({}); // To store user's assignment answers per task
-
     // --- Constants from Environment Variables (Adapted for standard React App) ---
     // These variables should be defined in your .env file in the project root
     const appId = process.env.REACT_APP_CUSTOM_APP_ID || 'default-quantum-leap-app';
     
     // Use useMemo to ensure firebaseConfig object is stable across renders
-    // FIX: This ensures the firebaseConfig object is created only once, resolving the ESLint warning.
     const firebaseConfig = useMemo(() => ({
         apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
         authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
@@ -138,13 +133,13 @@ const App = () => {
     }, [db, userId, appId, isAuthReady]);
 
     // --- Firestore Helpers ---
-    // FIX: Re-added appId to useCallback dependency array to resolve ESLint warning.
+    // Removed appId from useCallback dependency array as it's a stable constant
     const getModuleDocRef = useCallback((moduleId) => {
         if (!db || !userId) return null;
         return doc(db, `artifacts/${appId}/users/${userId}/modules`, moduleId);
-    }, [db, userId, appId]); // appId is a dependency
+    }, [db, userId, appId]); // appId removed
 
-    // FIX: Re-added appId to useCallback dependency array to resolve ESLint warning.
+    // Removed appId from useCallback dependency array as it's a stable constant
     const updateModuleInFirestore = useCallback(async (moduleId, data) => {
         if (!db || !userId) {
             setErrorMessage("Database not ready. Please try again.");
@@ -160,13 +155,13 @@ const App = () => {
             console.error("Error updating module:", error);
             setErrorMessage(`Failed to save module progress: ${error.message}`);
         }
-    }, [db, userId, getModuleDocRef, appId]); // appId is a dependency
+      }, [db, userId, getModuleDocRef, appId]); // Re-added appId
 
     // --- AI Generation for Resources and Assignments ---
     const generateModuleContent = useCallback(async (moduleName, moduleId) => {
         setLoading(true);
         setErrorMessage('');
-        if (!geminiApiKey) {
+        if (!geminiApiKey) { // Check if geminiApiKey is truly undefined or empty
             setErrorMessage("Gemini API Key is not set. Please set REACT_APP_GEMINI_API_KEY in your .env file.");
             setLoading(false);
             return;
@@ -175,7 +170,7 @@ const App = () => {
         try {
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
 
-            // 1. Generate Teacher's Picks (existing logic)
+            // 1. Generate Teacher's Picks
             const resourcePrompt = `Provide 3-5 highly recommended, reputable, and ideally open-access or widely available online resources (PDFs, websites, video series) for learning "${moduleName}". Format as a JSON array of objects with 'title' and 'url' properties. If a direct URL isn't common, provide a general description/search term.`;
             const resourcePayload = {
                 contents: [{ role: "user", parts: [{ text: resourcePrompt }] }],
@@ -189,7 +184,7 @@ const App = () => {
                                 "title": { "type": "STRING" },
                                 "url": { "type": "STRING" }
                             },
-                            "required": ["title"]
+                            "required": ["title"] // URL might not always be available
                         }
                     }
                 }
@@ -216,112 +211,24 @@ const App = () => {
             setTeacherPicks(parsedResources);
             await updateModuleInFirestore(moduleId, { teacherPicks: parsedResources });
 
-            // 2. Generate Assignment Content (NEW, detailed structure)
-            // MODIFIED PROMPT: Now explicitly asks for content based on moduleName, while maintaining the *structure* of the health tracker example.
-            const assignmentPrompt = `Generate a comprehensive assignment for a module on "${moduleName}".
-            The assignment MUST strictly follow the structural layout (number of sections, number of tasks per section, marks per task, types of tasks like text_input/code_input) of a typical coding assignment, similar to the "Simple Health Tracker Application" example you were previously given.
-            However, the ENTIRE CONTENT (scenario, question titles, task descriptions, and resources) must be ORIGINAL and RELEVANT to "${moduleName}", NOT about health tracking or Python unless "${moduleName}" is specifically a Python topic.
-            For any coding tasks, assume Python is the default language unless a different language is strongly implied by the module name.
-            Ensure all fields in the JSON schema are populated accurately and completely.
 
-            Assignment Structure Example (DO NOT USE THIS CONTENT, ONLY THE STRUCTURE):
-            Total Marks: 100
-            Scenario: Your assignment will have a main scenario.
-
-            Question 1: (20 Marks)
-            Sub-Scenario: This question will have a sub-scenario.
-            Task 1.1: (10 Marks) [text_input]
-            Task 1.2: (10 Marks) [text_input]
-
-            Question 2: (30 Marks)
-            Sub-Scenario: This question will have a sub-scenario.
-            Task 2.1: (15 Marks) [code_input, e.g., Python]
-            Task 2.2: (15 Marks) [code_input, e.g., Python]
-
-            Question 3: (20 Marks)
-            Sub-Scenario: This question will have a sub-scenario.
-            Task 3.1: (20 Marks) [text_input]
-
-            Question 4: (30 Marks)
-            Sub-Scenario: This question will have a sub-scenario.
-            Task 4.1: (20 Marks) [text_input]
-            Task 4.2: (10 Marks) [text_input]
-
-            Provide the output as a JSON object strictly following this schema, including relevant resources for "${moduleName}":
-            `;
-
-            const assignmentSchema = {
-                type: "OBJECT",
-                properties: {
-                    title: { type: "STRING" },
-                    total_marks: { type: "NUMBER" },
-                    scenario: {
-                        type: "OBJECT",
-                        properties: {
-                            title: { type: "STRING" },
-                            description: { type: "STRING" }
-                        },
-                        required: ["title", "description"]
-                    },
-                    sections: {
-                        type: "ARRAY",
-                        items: {
-                            type: "OBJECT",
-                            properties: {
-                                section_id: { type: "STRING" },
-                                section_title: { type: "STRING" },
-                                marks: { type: "NUMBER" },
-                                sub_scenario: {
-                                    type: "OBJECT",
-                                    properties: {
-                                        title: { type: "STRING" },
-                                        description: { type: "STRING" }
-                                    },
-                                    required: ["title", "description"]
-                                },
-                                tasks: {
-                                    type: "ARRAY",
-                                    items: {
-                                        type: "OBJECT",
-                                        properties: {
-                                            task_id: { type: "STRING" },
-                                            task_description: { type: "STRING" },
-                                            marks: { type: "NUMBER" },
-                                            type: { type: "STRING", enum: ["text_input", "code_input"] },
-                                            language: { type: "STRING" } // Optional, for code_input
-                                        },
-                                        required: ["task_id", "task_description", "marks", "type"]
-                                    }
-                                }
-                            },
-                            required: ["section_id", "section_title", "marks", "sub_scenario", "tasks"]
-                        }
-                    }
-                },
-                required: ["title", "total_marks", "scenario", "sections"] // Removed resources from required for now, as AI might sometimes omit it
-            };
-
-            // Add resources property to the schema dynamically if needed, or handle it as optional
-            assignmentSchema.properties.resources = {
-                type: "ARRAY",
-                items: {
-                    type: "OBJECT",
-                    properties: {
-                        title: { type: "STRING" },
-                        url: { type: "STRING" },
-                        type: { type: "STRING", enum: ["website", "video", "pdf", "book"] },
-                        category: { type: "STRING" }
-                    },
-                    required: ["title", "url", "type", "category"]
-                }
-            };
-
-
+            // 2. Generate Assignment Content
+            const assignmentPrompt = `Generate a comprehensive 2-part assignment for a module on "Introduction to ${moduleName}". Each part should have 2-3 bulleted tasks. Provide the output in a JSON object with 'title', 'part1_title', 'part1_tasks' (array of strings), 'part2_title', 'part2_tasks' (array of strings).`;
             const assignmentPayload = {
                 contents: [{ role: "user", parts: [{ text: assignmentPrompt }] }],
                 generationConfig: {
                     responseMimeType: "application/json",
-                    responseSchema: assignmentSchema
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            "title": { "type": "STRING" },
+                            "part1_title": { "type": "STRING" },
+                            "part1_tasks": { "type": "ARRAY", "items": { "type": "STRING" } },
+                            "part2_title": { "type": "STRING" },
+                            "part2_tasks": { "type": "ARRAY", "items": { "type": "STRING" } }
+                        },
+                        "required": ["title", "part1_title", "part1_tasks", "part2_title", "part2_tasks"]
+                    }
                 }
             };
 
@@ -330,12 +237,6 @@ const App = () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(assignmentPayload)
             });
-
-            if (!assignmentResponse.ok) {
-                const errorData = await assignmentResponse.json();
-                throw new Error(`API error: ${assignmentResponse.status} - ${errorData.error.message || assignmentResponse.statusText}`);
-            }
-
             const assignmentResult = await assignmentResponse.json();
             let parsedAssignment = null;
             if (assignmentResult.candidates && assignmentResult.candidates.length > 0 && assignmentResult.candidates[0].content && assignmentResult.candidates[0].content.parts && assignmentResult.candidates[0].content.parts.length > 0) {
@@ -344,39 +245,14 @@ const App = () => {
                 } catch (e) {
                     console.error("Failed to parse assignment JSON:", e, assignmentResult.candidates[0].content.parts[0].text);
                     setErrorMessage("AI generated malformed assignment. Using fallback.");
-                    // Provide a minimal fallback that matches the new structure to prevent further errors
-                    parsedAssignment = {
-                        title: `Generic Assignment for ${moduleName}`,
-                        total_marks: 100,
-                        scenario: { title: "Generic Scenario", description: "This is a fallback assignment." },
-                        sections: [{
-                            section_id: "fallback1",
-                            section_title: "Part 1: Fallback Tasks",
-                            marks: 50,
-                            sub_scenario: { title: "Fallback Sub-scenario", description: "Review basic concepts." },
-                            tasks: [{ task_id: "F1.1", task_description: "Complete task A.", marks: 25, type: "text_input" }]
-                        }],
-                        resources: []
-                    };
+                    parsedAssignment = { title: `Generic Assignment for ${moduleName}`, part1_title: "Part 1: Core Concepts", part1_tasks: ["Review fundamental principles."], part2_title: "Part 2: Application", part2_tasks: ["Solve practical problems."] };
                 }
             } else {
-                // Also provide a minimal fallback if no content is generated
-                parsedAssignment = {
-                    title: `Generic Assignment for ${moduleName}`,
-                    total_marks: 100,
-                    scenario: { title: "Generic Scenario", description: "This is a fallback assignment." },
-                    sections: [{
-                        section_id: "fallback1",
-                        section_title: "Part 1: Fallback Tasks",
-                        marks: 50,
-                        sub_scenario: { title: "Fallback Sub-scenario", description: "Review basic concepts." },
-                        tasks: [{ task_id: "F1.1", task_description: "Complete task A.", marks: 25, type: "text_input" }]
-                    }],
-                    resources: []
-                };
+                parsedAssignment = { title: `Generic Assignment for ${moduleName}`, part1_title: "Part 1: Core Concepts", part1_tasks: ["Review fundamental principles."], part2_title: "Part 2: Application", part2_tasks: ["Solve practical problems."] };
             }
             setAssignmentContent(parsedAssignment);
             await updateModuleInFirestore(moduleId, { assignmentContent: parsedAssignment });
+
 
         } catch (error) {
             console.error('Error generating module content:', error);
@@ -386,7 +262,7 @@ const App = () => {
         } finally {
             setLoading(false);
         }
-    }, [geminiApiKey, updateModuleInFirestore]);
+    }, [geminiApiKey, updateModuleInFirestore]); // Dependencies for useCallback
 
     // --- Module Management ---
     const createNewModule = async () => {
@@ -398,7 +274,7 @@ const App = () => {
             setErrorMessage("Database not ready. Please wait for authentication.");
             return;
         }
-        if (!geminiApiKey) {
+        if (!geminiApiKey) { // Check if geminiApiKey is truly undefined or empty
             setErrorMessage("Gemini API Key is not set. Please set REACT_APP_GEMINI_API_KEY in your .env file.");
             return;
         }
@@ -409,11 +285,11 @@ const App = () => {
             const moduleId = `module-${Date.now()}`;
             const newModuleData = {
                 name: topic,
-                status: 'started',
-                resources: [],
-                teacherPicks: [],
-                assignmentContent: null,
-                assignments: {}, // Assignments will now be tracked by section completion, not part1/part2
+                status: 'started', // 'started', 'resources_added', 'assignment_done', 'quizzes_done', 'completed', 'needs_revisit'
+                resources: [], // User-added resources
+                teacherPicks: [], // AI-generated teacher picks (will be populated by generateModuleContent)
+                assignmentContent: null, // AI-generated assignment details (will be populated by generateModuleContent)
+                assignments: { 'part1': false, 'part2': false },
                 quizzes: [],
                 finalTestScore: 0,
                 certificateIssued: false,
@@ -422,16 +298,17 @@ const App = () => {
             };
             await setDoc(getModuleDocRef(moduleId), newModuleData);
             setCurrentModule({ id: moduleId, ...newModuleData });
-            setAppPhase('assignment'); // Start directly at assignment for new modules
+            setAppPhase('resources');
             setTopic('');
             console.log("New module created:", newModuleData);
-            await generateModuleContent(newModuleData.name, moduleId);
+            // Now, generate content for the newly created module
+            await generateModuleContent(newModuleData.name, moduleId); 
+            // Update the currentModule state with the newly generated content
+            // Fetch the updated module from Firestore after generation to ensure all data is consistent
             const updatedModuleDoc = await getDoc(getModuleDocRef(moduleId));
             if (updatedModuleDoc.exists()) {
                 setCurrentModule({ id: updatedModuleDoc.id, ...updatedModuleDoc.data() });
             }
-            setCurrentAssignmentSectionIndex(0); // Reset to first section for new assignment
-            setAssignmentResponses({}); // Clear previous responses
         } catch (error) {
             console.error("Error creating module:", error);
             setErrorMessage(`Failed to create module: ${error.message}`);
@@ -443,8 +320,8 @@ const App = () => {
     const selectModule = async (module) => {
         setCurrentModule(module);
         setErrorMessage('');
-        setTeacherPicks(module.teacherPicks || []);
-        setAssignmentContent(module.assignmentContent || null);
+        setTeacherPicks(module.teacherPicks || []); // Load saved teacher picks
+        setAssignmentContent(module.assignmentContent || null); // Load saved assignment content
 
         // Determine phase based on module status
         if (module.status === 'completed' || module.status === 'needs_revisit') {
@@ -454,32 +331,22 @@ const App = () => {
                 comment: module.status === 'completed' ? 'Congratulations! You have mastered this module.' : 'This module requires further study and practice.',
                 certificateIssued: module.certificateIssued
             });
+        } else if (!module.assignments.part1 || !module.assignments.part2) {
+            setAppPhase('assignment');
+        } else if (module.quizzes.length === 0 || module.quizzes.some(q => q.score < 80)) { // Simple logic: if any quiz not passed or no quizzes
+            setAppPhase('quiz');
         } else {
-            // If assignment content is missing or not yet generated, attempt to generate it
-            if (!module.assignmentContent || !module.teacherPicks || module.teacherPicks.length === 0) {
-                setAppPhase('assignment'); // Stay on assignment phase while loading/generating
-                setLoading(true); // Indicate loading
-                await generateModuleContent(module.name, module.id);
-                // After generation, fetch the updated module to ensure state is consistent
-                const updatedModuleDoc = await getDoc(getModuleDocRef(module.id));
-                if (updatedModuleDoc.exists()) {
-                    setCurrentModule({ id: updatedModuleDoc.id, ...updatedModuleDoc.data() });
-                    setAssignmentContent(updatedModuleDoc.data().assignmentContent); // Update assignment content state
-                    setTeacherPicks(updatedModuleDoc.data().teacherPicks); // Update teacher picks state
-                }
-                setLoading(false);
-            }
+            setAppPhase('finalTest');
+        }
 
-            // After ensuring assignmentContent is loaded/generated, proceed with phase determination
-            if (module.status === 'assignment_done') {
-                setAppPhase('quiz');
-            } else if (module.quizzes.length > 0 && module.quizzes.every(q => q.score >= 80)) { // All quizzes passed
-                setAppPhase('finalTest');
-            } else {
-                setAppPhase('assignment'); // Default to assignment if not completed or quizzes not passed
+        // If module content (teacher picks or assignment) hasn't been generated yet for this module, generate it
+        if (!module.teacherPicks || module.teacherPicks.length === 0 || !module.assignmentContent) {
+            await generateModuleContent(module.name, module.id);
+            // After generation, update currentModule with the new data
+            const updatedModuleDoc = await getDoc(getModuleDocRef(module.id));
+            if (updatedModuleDoc.exists()) {
+                setCurrentModule({ id: updatedModuleDoc.id, ...updatedModuleDoc.data() });
             }
-            setCurrentAssignmentSectionIndex(0); // Go to first section of assignment
-            setAssignmentResponses({}); // Clear responses when selecting module
         }
     };
 
@@ -495,50 +362,16 @@ const App = () => {
         setResourceInput('');
     };
 
-    // --- NEW Assignment Navigation & Submission ---
-    const handleAssignmentResponseChange = (sectionId, taskId, value) => {
-        setAssignmentResponses(prev => ({
-            ...prev,
-            [sectionId]: {
-                ...(prev[sectionId] || {}),
-                [taskId]: value
-            }
-        }));
-    };
-
-    const goToNextAssignmentSection = async () => {
-        if (assignmentContent && currentAssignmentSectionIndex < assignmentContent.sections.length - 1) {
-            setCurrentAssignmentSectionIndex(prev => prev + 1);
-        } else {
-            // This is the last section, so consider assignment complete
-            if (currentModule) {
-                const updatedAssignments = { ...currentModule.assignments, completed: true }; // Mark assignment as completed
-                const updatedModule = { ...currentModule, assignments: updatedAssignments, status: 'assignment_done', lastUpdated: new Date().toISOString() };
-                setCurrentModule(updatedModule);
-                await updateModuleInFirestore(currentModule.id, { assignments: updatedAssignments, status: updatedModule.status, lastUpdated: updatedModule.lastUpdated });
-                setAppPhase('quiz'); // Move to quiz phase
-            }
-        }
-    };
-
-    const goToPreviousAssignmentSection = () => {
-        if (currentAssignmentSectionIndex > 0) {
-            setCurrentAssignmentSectionIndex(prev => prev - 1);
-        }
-    };
-
-    const submitAssignment = async () => {
-        if (!currentModule || !assignmentContent) {
-            setErrorMessage("No assignment to submit.");
-            return;
-        }
-        // In a real app, you'd send assignmentResponses to a backend for grading.
-        // For now, we'll just mark it as complete.
-        const updatedAssignments = { ...currentModule.assignments, completed: true, responses: assignmentResponses };
-        const updatedModule = { ...currentModule, assignments: updatedAssignments, status: 'assignment_done', lastUpdated: new Date().toISOString() };
+    const completeAssignmentPart = async (part) => {
+        if (!currentModule) return;
+        const updatedAssignments = { ...currentModule.assignments, [part]: true };
+        const updatedStatus = updatedAssignments.part1 && updatedAssignments.part2 ? 'assignment_done' : 'resources_added'; // If both parts done
+        const updatedModule = { ...currentModule, assignments: updatedAssignments, status: updatedStatus, lastUpdated: new Date().toISOString() };
         setCurrentModule(updatedModule);
-        await updateModuleInFirestore(currentModule.id, { assignments: updatedAssignments, status: updatedModule.status, lastUpdated: updatedModule.lastUpdated });
-        alert('Assignment submitted! (In a real app, this would be graded)');
+        await updateModuleInFirestore(currentModule.id, { assignments: updatedAssignments, status: updatedStatus, lastUpdated: updatedModule.lastUpdated });
+        if (updatedStatus === 'assignment_done') {
+            setAppPhase('quiz'); // Move to quiz phase after assignment
+        }
     };
 
     // --- AI Test Generation ---
@@ -547,7 +380,7 @@ const App = () => {
             setErrorMessage('Please select or create a module first.');
             return;
         }
-        if (!geminiApiKey) {
+        if (!geminiApiKey) { // Check if geminiApiKey is truly undefined or empty
             setErrorMessage("Gemini API Key is not set. Please set REACT_APP_GEMINI_API_KEY in your .env file.");
             return;
         }
@@ -563,7 +396,7 @@ const App = () => {
         // Include current module's resources in the prompt for AI to base questions on
         // Combine user-added and AI-generated teacher picks
         const combinedResources = [
-            ...(currentModule.resources || []),
+            ...(currentModule.resources || []), 
             ...(teacherPicks || []).map(p => p.url || p.title)
         ];
         const resourceListForPrompt = combinedResources.length > 0 ? `The questions must be directly based on the following types of resources: ${combinedResources.join(', ')}.` : 'The questions must be directly based on standard academic textbooks and lectures.';
@@ -684,11 +517,12 @@ const App = () => {
             const updatedModule = { ...currentModule, quizzes: updatedQuizzes, lastUpdated: new Date().toISOString() };
             setCurrentModule(updatedModule);
             await updateModuleInFirestore(currentModule.id, { quizzes: updatedQuizzes, lastUpdated: updatedModule.lastUpdated });
+            // If quiz passed, maybe suggest moving to final test or next assignment part
             if (calculatedScore >= 80) {
-                setAppPhase('finalTest');
+                setAppPhase('finalTest'); // Suggest moving to final test after passing quizzes
             }
         } else if (type === 'finalTest') {
-            const certificateIssued = calculatedScore >= 80;
+            const certificateIssued = calculatedScore >= 80; // Mastery threshold
             const status = certificateIssued ? 'completed' : 'needs_revisit';
             const updatedModule = {
                 ...currentModule,
@@ -715,7 +549,7 @@ const App = () => {
     };
 
     const downloadCertificate = () => {
-        document.execCommand('copy'); // Simulate download by copying to clipboard
+        // In a real application, you would generate a PDF or image here.
         alert('Certificate download initiated! (In a real app, a file would download)');
     };
 
@@ -723,8 +557,8 @@ const App = () => {
         if (!currentModule) return;
         const updatedModule = {
             ...currentModule,
-            status: 'started',
-            assignments: {}, // Reset assignments
+            status: 'started', // Reset to start
+            assignments: { 'part1': false, 'part2': false },
             quizzes: [],
             finalTestScore: 0,
             certificateIssued: false,
@@ -732,9 +566,7 @@ const App = () => {
         };
         setCurrentModule(updatedModule);
         await updateModuleInFirestore(currentModule.id, updatedModule);
-        setAppPhase('assignment'); // Go back to assignment start
-        setCurrentAssignmentSectionIndex(0); // Reset assignment section
-        setAssignmentResponses({}); // Clear responses
+        setAppPhase('resources'); // Go back to resources or assignment start
         setQuestions([]);
         setUserAnswers({});
         setScore(0);
@@ -743,96 +575,6 @@ const App = () => {
         setErrorMessage('');
         setAssessmentMetrics(null);
         setLastScoreDetails(null);
-    };
-
-    // --- Navigation Handlers ---
-    const handleGoHome = () => {
-        setAppPhase('moduleSelect');
-        setCurrentModule(null); // Clear current module when going home
-        // Reset other states as needed for a clean start
-        setQuestions([]);
-        setUserAnswers({});
-        setScore(0);
-        setShowCertificate(false);
-        setUserName('');
-        setErrorMessage('');
-        setAssessmentMetrics(null);
-        setLastScoreDetails(null);
-        setCurrentAssignmentSectionIndex(0);
-        setAssignmentResponses({});
-    };
-
-    const handleNavigateToPhase = (phase) => {
-        if (currentModule) { // Only navigate if a module is selected
-            setAppPhase(phase);
-            // Reset relevant states when navigating between major phases
-            if (phase === 'assignment') {
-                setCurrentAssignmentSectionIndex(0);
-                setAssignmentResponses({});
-            } else if (phase === 'quiz' || phase === 'finalTest') {
-                setQuestions([]);
-                setUserAnswers({});
-                setScore(0);
-            }
-        } else {
-            setErrorMessage("Please select a module first to navigate to this section.");
-        }
-    };
-
-    // --- UI Components ---
-    const NavigationBar = ({ currentPhase, onNavigate, onGoHome, currentModule }) => (
-        <div className="flex flex-wrap justify-center gap-2 md:gap-4 mb-8 p-4 bg-gray-100 rounded-lg shadow-inner">
-            <button
-                onClick={onGoHome}
-                className="bg-gray-500 text-white font-bold py-2 px-4 rounded-lg shadow-md hover:bg-gray-600 transition-colors duration-200 text-sm md:text-base"
-            >
-                Back to Modules
-            </button>
-            {currentModule && (
-                <>
-                    <button
-                        onClick={() => onNavigate('assignment')}
-                        className={`py-2 px-4 rounded-lg font-bold text-sm md:text-base transition-colors duration-200 ${currentPhase === 'assignment' ? 'bg-blue-600 text-white shadow-lg' : 'bg-blue-200 text-blue-800 hover:bg-blue-300'}`}
-                    >
-                        Assignment
-                    </button>
-                    <button
-                        onClick={() => onNavigate('quiz')}
-                        className={`py-2 px-4 rounded-lg font-bold text-sm md:text-base transition-colors duration-200 ${currentPhase === 'quiz' ? 'bg-purple-600 text-white shadow-lg' : 'bg-purple-200 text-purple-800 hover:bg-purple-300'}`}
-                    >
-                        Quiz
-                    </button>
-                    <button
-                        onClick={() => onNavigate('finalTest')}
-                        className={`py-2 px-4 rounded-lg font-bold text-sm md:text-base transition-colors duration-200 ${currentPhase === 'finalTest' ? 'bg-red-600 text-white shadow-lg' : 'bg-red-200 text-red-800 hover:bg-red-300'}`}
-                    >
-                        Final Test
-                    </button>
-                </>
-            )}
-        </div>
-    );
-
-    const QuestionTabs = ({ items, currentIndex, onSelectIndex, type }) => {
-        if (!items || items.length === 0) return null;
-
-        return (
-            <div className="flex flex-wrap justify-center gap-2 md:gap-3 mb-6 p-3 bg-gray-50 rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
-                {items.map((item, index) => (
-                    <button
-                        key={index}
-                        onClick={() => onSelectIndex(index)}
-                        className={`py-2 px-4 rounded-md font-semibold text-sm transition-all duration-200 whitespace-nowrap
-                            ${index === currentIndex
-                                ? 'bg-indigo-600 text-white shadow-md transform scale-105'
-                                : 'bg-indigo-100 text-indigo-800 hover:bg-indigo-200'
-                            }`}
-                    >
-                        {type === 'assignment' ? `Section ${index + 1}` : `Question ${index + 1}`}
-                    </button>
-                ))}
-            </div>
-        );
     };
 
     // --- UI Rendering Logic ---
@@ -962,133 +704,72 @@ const App = () => {
         </div>
     );
 
-    const renderAssignmentPhase = () => {
-        if (!currentModule || (!assignmentContent && !loading)) { // Show "No assignment" only if not loading
-            return (
-                <div className="text-center p-8">
-                    <p className="text-red-600 text-lg">No assignment loaded for this module.</p>
-                    <button
-                        onClick={() => setAppPhase('moduleSelect')}
-                        className="mt-4 bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700"
-                    >
-                        Back to Modules
-                    </button>
-                </div>
-            );
-        }
+    const renderAssignmentPhase = () => (
+        <div className="space-y-6">
+            <h2 className="text-3xl font-bold text-gray-800 text-center mb-6">Module: {currentModule?.name} - Assignment</h2>
+            <p className="text-gray-700 text-lg text-center">
+                Complete the following assignment tasks to deepen your understanding.
+            </p>
 
-        if (loading || !assignmentContent) { // Show loading if content is null AND loading is true
-            return (
-                <div className="text-center p-8">
-                    <p className="text-blue-600 text-xl font-semibold">Loading assignment content...</p>
-                    <p className="text-gray-600 mt-2">This might take a moment as the AI generates it.</p>
-                </div>
-            );
-        }
-
-        const currentSection = assignmentContent.sections[currentAssignmentSectionIndex];
-        const isFirstSection = currentAssignmentSectionIndex === 0;
-        const isLastSection = currentAssignmentSectionIndex === assignmentContent.sections.length - 1;
-
-        return (
-            <div className="space-y-6">
-                {/* Tabs for sections */}
-                <QuestionTabs
-                    items={assignmentContent.sections}
-                    currentIndex={currentAssignmentSectionIndex}
-                    onSelectIndex={setCurrentAssignmentSectionIndex}
-                    type="assignment"
-                />
-
-                <h2 className="text-3xl font-bold text-gray-800 text-center mb-6">Module: {currentModule?.name} - Assignment</h2>
-                <p className="text-gray-700 text-lg text-center">
-                    **{assignmentContent.title}** (Total Marks: {assignmentContent.total_marks})
-                </p>
-                <p className="text-gray-600 text-base text-center mb-4">
-                    {assignmentContent.scenario.description}
-                </p>
-
-                {/* Removed redundant loading check here as it's handled above */}
+            {loading ? (
+                <p className="text-blue-700 text-lg text-center">Generating assignment...</p>
+            ) : !assignmentContent ? (
+                <p className="text-red-600 text-center">Assignment content not available. Please try generating module content again.</p>
+            ) : (
                 <div className="p-6 bg-yellow-50 rounded-lg shadow-inner space-y-6">
-                    <h3 className="text-2xl font-bold text-yellow-800 text-center mb-4">
-                        {currentSection.section_title} ({currentSection.marks} Marks)
-                    </h3>
-                    <p className="text-gray-700 text-lg font-semibold">{currentSection.sub_scenario.title}</p>
-                    <p className="text-gray-600 text-base mb-4">{currentSection.sub_scenario.description}</p>
+                    <h3 className="text-2xl font-bold text-yellow-800 text-center">{assignmentContent.title}</h3>
 
-                    {currentSection.tasks.map((task) => (
-                        <div key={task.task_id} className="mb-4 p-4 border border-yellow-200 rounded-lg bg-white shadow-sm">
-                            <p className="text-lg font-semibold text-gray-900 mb-2">
-                                {task.task_id}. {task.task_description} ({task.marks} Marks)
-                            </p>
-                            {task.type === 'text_input' && (
-                                <textarea
-                                    className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-base font-mono"
-                                    rows="6"
-                                    placeholder={`Enter your response for Task ${task.task_id} here...`}
-                                    value={assignmentResponses[currentSection.section_id]?.[task.task_id] || ''}
-                                    onChange={(e) => handleAssignmentResponseChange(currentSection.section_id, task.task_id, e.target.value)}
-                                ></textarea>
-                            )}
-                            {task.type === 'code_input' && (
-                                <textarea
-                                    className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 outline-none text-base font-mono bg-gray-900 text-green-400"
-                                    rows="10"
-                                    placeholder={`Write your ${task.language || 'Python'} code for Task ${task.task_id} here...`}
-                                    value={assignmentResponses[currentSection.section_id]?.[task.task_id] || ''}
-                                    onChange={(e) => handleAssignmentResponseChange(currentSection.section_id, task.task_id, e.target.value)}
-                                ></textarea>
-                            )}
-                        </div>
-                    ))}
-                </div>
-
-                <div className="flex justify-between gap-4 mt-8">
-                    <button
-                        onClick={goToPreviousAssignmentSection}
-                        disabled={isFirstSection}
-                        className="bg-gray-300 text-gray-800 font-bold py-3 px-6 rounded-lg shadow-md hover:bg-gray-400 transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed text-lg"
-                    >
-                        Previous Section
-                    </button>
-                    {isLastSection ? (
-                        <button
-                            onClick={submitAssignment}
-                            className="bg-green-600 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:bg-green-700 transition-all duration-300 transform hover:scale-105 text-lg"
-                        >
-                            Submit Assignment
-                        </button>
-                    ) : (
-                        <button
-                            onClick={goToNextAssignmentSection}
-                            className="bg-blue-600 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:bg-blue-700 transition-all duration-300 transform hover:scale-105 text-lg"
-                        >
-                            Next Section
-                        </button>
-                    )}
-                </div>
-
-                <div className="mt-8 pt-6 border-t border-gray-200">
-                    <h3 className="text-2xl font-bold text-gray-800 mb-4">Resources for this Assignment</h3>
-                    {assignmentContent.resources.length === 0 ? (
-                        <p className="text-gray-600">No specific resources provided for this assignment.</p>
-                    ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {assignmentContent.resources.map((res, index) => (
-                                <div key={index} className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-                                    <p className="font-semibold text-blue-800">{res.title}</p>
-                                    <p className="text-sm text-gray-600">Category: {res.category}</p>
-                                    <a href={res.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-sm break-words">
-                                        {res.url}
-                                    </a>
-                                </div>
+                    <div>
+                        <h4 className="text-xl font-semibold text-yellow-700 mb-2">{assignmentContent.part1_title}</h4>
+                        <ul className="list-disc list-inside space-y-2 text-gray-700">
+                            {assignmentContent.part1_tasks.map((task, index) => (
+                                <li key={`part1-task-${index}`}>{task}</li>
                             ))}
-                        </div>
-                    )}
+                        </ul>
+                        <button
+                            onClick={() => completeAssignmentPart('part1')}
+                            disabled={currentModule?.assignments.part1}
+                            className={`mt-4 w-full sm:w-auto ${currentModule?.assignments.part1 ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'} text-white font-bold py-2 px-4 rounded-lg shadow-md transition-all duration-200`}
+                        >
+                            {currentModule?.assignments.part1 ? 'Part 1 Completed' : 'Mark Part 1 as Complete'}
+                        </button>
+                    </div>
+
+                    <div>
+                        <h4 className="text-xl font-semibold text-yellow-700 mb-2">{assignmentContent.part2_title}</h4>
+                        <ul className="list-disc list-inside space-y-2 text-gray-700">
+                            {assignmentContent.part2_tasks.map((task, index) => (
+                                <li key={`part2-task-${index}`}>{task}</li>
+                            ))}
+                        </ul>
+                        <button
+                            onClick={() => completeAssignmentPart('part2')}
+                            disabled={currentModule?.assignments.part2}
+                            className={`mt-4 w-full sm:w-auto ${currentModule?.assignments.part2 ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'} text-white font-bold py-2 px-4 rounded-lg shadow-md transition-all duration-200`}
+                        >
+                            {currentModule?.assignments.part2 ? 'Part 2 Completed' : 'Mark Part 2 as Complete'}
+                        </button>
+                    </div>
                 </div>
+            )}
+
+            <div className="flex justify-center gap-4 mt-8">
+                <button
+                    onClick={() => setAppPhase('quiz')}
+                    disabled={!currentModule?.assignments.part1 || !currentModule?.assignments.part2}
+                    className="bg-blue-600 text-white font-bold py-3 px-8 rounded-lg shadow-lg hover:bg-blue-700 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed text-lg"
+                >
+                    Proceed to Quiz
+                </button>
+                <button
+                    onClick={() => setAppPhase('resources')}
+                    className="bg-gray-300 text-gray-800 font-bold py-3 px-8 rounded-lg shadow-md hover:bg-gray-400 transition-all duration-200 transform hover:scale-105 text-lg"
+                >
+                    Back to Resources
+                </button>
             </div>
-        );
-    };
+        </div>
+    );
 
     const renderQuizPhase = () => (
         <div className="space-y-6">
@@ -1124,13 +805,6 @@ const App = () => {
 
             {questions.length > 0 && (
                 <div className="p-6 bg-gray-50 rounded-lg shadow-md">
-                    {/* Tabs for questions */}
-                    <QuestionTabs
-                        items={questions}
-                        currentIndex={0} // Quiz doesn't have individual question navigation, just a list
-                        onSelectIndex={() => {}} // No-op for quiz as it's a single scrollable list
-                        type="quiz"
-                    />
                     <h3 className="text-2xl font-bold text-gray-800 mb-6 text-center">Your Quiz Questions</h3>
                     {questions.map((q, qIndex) => (
                         <div key={qIndex} className="mb-6 p-5 border border-gray-200 rounded-lg bg-white shadow-sm hover:shadow-md transition-shadow duration-200">
@@ -1166,7 +840,7 @@ const App = () => {
             <div className="flex justify-center gap-4 mt-8">
                 <button
                     onClick={() => setAppPhase('finalTest')}
-                    disabled={!currentModule?.quizzes.some(q => q.score >= 80)}
+                    disabled={!currentModule?.quizzes.some(q => q.score >= 80)} // Only enable if at least one quiz passed
                     className="bg-blue-600 text-white font-bold py-3 px-8 rounded-lg shadow-lg hover:bg-blue-700 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed text-lg"
                 >
                     Proceed to Final Test
@@ -1215,13 +889,6 @@ const App = () => {
 
             {questions.length > 0 && (
                 <div className="p-6 bg-gray-50 rounded-lg shadow-md">
-                    {/* Tabs for questions */}
-                    <QuestionTabs
-                        items={questions}
-                        currentIndex={0} // Final Test also doesn't have individual question navigation for now
-                        onSelectIndex={() => {}} // No-op for final test as it's a single scrollable list
-                        type="finalTest"
-                    />
                     <h3 className="text-2xl font-bold text-gray-800 mb-6 text-center">Your Final Test Questions</h3>
                     {questions.map((q, qIndex) => (
                         <div key={qIndex} className="mb-6 p-5 border border-gray-200 rounded-lg bg-white shadow-sm hover:shadow-md transition-shadow duration-200">
@@ -1313,7 +980,7 @@ const App = () => {
                     <button
                         onClick={() => {
                             setAppPhase('moduleSelect');
-                            setCurrentModule(null);
+                            setCurrentModule(null); // Clear current module
                             setQuestions([]);
                             setUserAnswers({});
                             setScore(0);
@@ -1322,8 +989,6 @@ const App = () => {
                             setErrorMessage('');
                             setAssessmentMetrics(null);
                             setLastScoreDetails(null);
-                            setCurrentAssignmentSectionIndex(0); // Reset assignment section
-                            setAssignmentResponses({}); // Clear responses
                         }}
                         className="bg-gray-300 text-gray-800 font-bold py-3 px-6 rounded-lg shadow-md hover:bg-gray-400 transition-all duration-200 transform hover:scale-105 text-lg"
                     >
@@ -1334,6 +999,8 @@ const App = () => {
         </div>
     );
 
+
+    // --- Main Render Function ---
     const renderContent = () => {
         if (!isAuthReady) {
             return (
@@ -1351,7 +1018,7 @@ const App = () => {
                     <p className="text-red-700 font-bold text-2xl mb-4">Error!</p>
                     <p className="text-red-600 text-lg">{errorMessage}</p>
                     <button
-                        onClick={() => setErrorMessage('')}
+                        onClick={() => setErrorMessage('')} // Allow user to dismiss
                         className="mt-6 bg-red-500 text-white py-2 px-4 rounded-lg hover:bg-red-600 transition-colors"
                     >
                         Dismiss
@@ -1360,37 +1027,22 @@ const App = () => {
             );
         }
 
-        return (
-            <>
-                {appPhase !== 'moduleSelect' && appPhase !== 'results' && currentModule && (
-                    <NavigationBar
-                        currentPhase={appPhase}
-                        onNavigate={handleNavigateToPhase}
-                        onGoHome={handleGoHome}
-                        currentModule={currentModule} // Pass currentModule to enable/disable navigation
-                    />
-                )}
-                {/* Render the specific phase content */}
-                {(() => {
-                    switch (appPhase) {
-                        case 'moduleSelect':
-                            return renderModuleSelect();
-                        case 'resources':
-                            return renderResourcesPhase();
-                        case 'assignment':
-                            return renderAssignmentPhase();
-                        case 'quiz':
-                            return renderQuizPhase();
-                        case 'finalTest':
-                            return renderFinalTestPhase();
-                        case 'results':
-                            return renderResultsPhase();
-                        default:
-                            return renderModuleSelect();
-                    }
-                })()}
-            </>
-        );
+        switch (appPhase) {
+            case 'moduleSelect':
+                return renderModuleSelect();
+            case 'resources':
+                return renderResourcesPhase();
+            case 'assignment':
+                return renderAssignmentPhase();
+            case 'quiz':
+                return renderQuizPhase();
+            case 'finalTest':
+                return renderFinalTestPhase();
+            case 'results':
+                return renderResultsPhase();
+            default:
+                return renderModuleSelect();
+        }
     };
 
     return (

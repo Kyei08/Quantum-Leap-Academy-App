@@ -22,7 +22,7 @@ const App = () => {
     const [currentModule, setCurrentModule] = useState(null); // The currently active module object
     const [modules, setModules] = useState([]); // List of all modules for the current user
     const [topic, setTopic] = useState(''); // Input for new module topic
-    const [resourceInput, setResourceInput] = useState(''); // Input for new resource URL/description
+    const [resourceInput, setResourceInput] = ''; // Input for new resource URL/description
     const [questions, setQuestions] = useState([]); // AI-generated test questions
     const [userAnswers, setUserAnswers] = useState({}); // User's selected answers
     // eslint-disable-next-line no-unused-vars
@@ -296,26 +296,23 @@ const App = () => {
                             },
                             required: ["section_id", "section_title", "marks", "sub_scenario", "tasks"]
                         }
+                    },
+                    resources: {
+                        type: "ARRAY",
+                        items: {
+                            type: "OBJECT",
+                            properties: {
+                                title: { type: "STRING" },
+                                url: { type: "STRING" },
+                                type: { type: "STRING", enum: ["website", "video", "pdf", "book"] },
+                                category: { type: "STRING" }
+                            },
+                            required: ["title", "url", "type", "category"]
+                        }
                     }
                 },
-                required: ["title", "total_marks", "scenario", "sections"] // Removed resources from required for now, as AI might sometimes omit it
+                required: ["title", "total_marks", "scenario", "sections", "resources"]
             };
-
-            // Add resources property to the schema dynamically if needed, or handle it as optional
-            assignmentSchema.properties.resources = {
-                type: "ARRAY",
-                items: {
-                    type: "OBJECT",
-                    properties: {
-                        title: { type: "STRING" },
-                        url: { type: "STRING" },
-                        type: { type: "STRING", enum: ["website", "video", "pdf", "book"] },
-                        category: { type: "STRING" }
-                    },
-                    required: ["title", "url", "type", "category"]
-                }
-            };
-
 
             const assignmentPayload = {
                 contents: [{ role: "user", parts: [{ text: assignmentPrompt }] }],
@@ -328,7 +325,7 @@ const App = () => {
             const assignmentResponse = await fetch(apiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(assignmentPayload)
+                body: JSON.stringify(payload)
             });
 
             if (!assignmentResponse.ok) {
@@ -538,6 +535,7 @@ const App = () => {
         const updatedModule = { ...currentModule, assignments: updatedAssignments, status: 'assignment_done', lastUpdated: new Date().toISOString() };
         setCurrentModule(updatedModule);
         await updateModuleInFirestore(currentModule.id, { assignments: updatedAssignments, status: updatedModule.status, lastUpdated: updatedModule.lastUpdated });
+        setAppPhase('quiz'); // Move to quiz phase
         alert('Assignment submitted! (In a real app, this would be graded)');
     };
 
@@ -745,96 +743,6 @@ const App = () => {
         setLastScoreDetails(null);
     };
 
-    // --- Navigation Handlers ---
-    const handleGoHome = () => {
-        setAppPhase('moduleSelect');
-        setCurrentModule(null); // Clear current module when going home
-        // Reset other states as needed for a clean start
-        setQuestions([]);
-        setUserAnswers({});
-        setScore(0);
-        setShowCertificate(false);
-        setUserName('');
-        setErrorMessage('');
-        setAssessmentMetrics(null);
-        setLastScoreDetails(null);
-        setCurrentAssignmentSectionIndex(0);
-        setAssignmentResponses({});
-    };
-
-    const handleNavigateToPhase = (phase) => {
-        if (currentModule) { // Only navigate if a module is selected
-            setAppPhase(phase);
-            // Reset relevant states when navigating between major phases
-            if (phase === 'assignment') {
-                setCurrentAssignmentSectionIndex(0);
-                setAssignmentResponses({});
-            } else if (phase === 'quiz' || phase === 'finalTest') {
-                setQuestions([]);
-                setUserAnswers({});
-                setScore(0);
-            }
-        } else {
-            setErrorMessage("Please select a module first to navigate to this section.");
-        }
-    };
-
-    // --- UI Components ---
-    const NavigationBar = ({ currentPhase, onNavigate, onGoHome, currentModule }) => (
-        <div className="flex flex-wrap justify-center gap-2 md:gap-4 mb-8 p-4 bg-gray-100 rounded-lg shadow-inner">
-            <button
-                onClick={onGoHome}
-                className="bg-gray-500 text-white font-bold py-2 px-4 rounded-lg shadow-md hover:bg-gray-600 transition-colors duration-200 text-sm md:text-base"
-            >
-                Back to Modules
-            </button>
-            {currentModule && (
-                <>
-                    <button
-                        onClick={() => onNavigate('assignment')}
-                        className={`py-2 px-4 rounded-lg font-bold text-sm md:text-base transition-colors duration-200 ${currentPhase === 'assignment' ? 'bg-blue-600 text-white shadow-lg' : 'bg-blue-200 text-blue-800 hover:bg-blue-300'}`}
-                    >
-                        Assignment
-                    </button>
-                    <button
-                        onClick={() => onNavigate('quiz')}
-                        className={`py-2 px-4 rounded-lg font-bold text-sm md:text-base transition-colors duration-200 ${currentPhase === 'quiz' ? 'bg-purple-600 text-white shadow-lg' : 'bg-purple-200 text-purple-800 hover:bg-purple-300'}`}
-                    >
-                        Quiz
-                    </button>
-                    <button
-                        onClick={() => onNavigate('finalTest')}
-                        className={`py-2 px-4 rounded-lg font-bold text-sm md:text-base transition-colors duration-200 ${currentPhase === 'finalTest' ? 'bg-red-600 text-white shadow-lg' : 'bg-red-200 text-red-800 hover:bg-red-300'}`}
-                    >
-                        Final Test
-                    </button>
-                </>
-            )}
-        </div>
-    );
-
-    const QuestionTabs = ({ items, currentIndex, onSelectIndex, type }) => {
-        if (!items || items.length === 0) return null;
-
-        return (
-            <div className="flex flex-wrap justify-center gap-2 md:gap-3 mb-6 p-3 bg-gray-50 rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
-                {items.map((item, index) => (
-                    <button
-                        key={index}
-                        onClick={() => onSelectIndex(index)}
-                        className={`py-2 px-4 rounded-md font-semibold text-sm transition-all duration-200 whitespace-nowrap
-                            ${index === currentIndex
-                                ? 'bg-indigo-600 text-white shadow-md transform scale-105'
-                                : 'bg-indigo-100 text-indigo-800 hover:bg-indigo-200'
-                            }`}
-                    >
-                        {type === 'assignment' ? `Section ${index + 1}` : `Question ${index + 1}`}
-                    </button>
-                ))}
-            </div>
-        );
-    };
-
     // --- UI Rendering Logic ---
     const renderModuleSelect = () => (
         <div className="space-y-6">
@@ -992,14 +900,6 @@ const App = () => {
 
         return (
             <div className="space-y-6">
-                {/* Tabs for sections */}
-                <QuestionTabs
-                    items={assignmentContent.sections}
-                    currentIndex={currentAssignmentSectionIndex}
-                    onSelectIndex={setCurrentAssignmentSectionIndex}
-                    type="assignment"
-                />
-
                 <h2 className="text-3xl font-bold text-gray-800 text-center mb-6">Module: {currentModule?.name} - Assignment</h2>
                 <p className="text-gray-700 text-lg text-center">
                     **{assignmentContent.title}** (Total Marks: {assignmentContent.total_marks})
@@ -1124,13 +1024,6 @@ const App = () => {
 
             {questions.length > 0 && (
                 <div className="p-6 bg-gray-50 rounded-lg shadow-md">
-                    {/* Tabs for questions */}
-                    <QuestionTabs
-                        items={questions}
-                        currentIndex={0} // Quiz doesn't have individual question navigation, just a list
-                        onSelectIndex={() => {}} // No-op for quiz as it's a single scrollable list
-                        type="quiz"
-                    />
                     <h3 className="text-2xl font-bold text-gray-800 mb-6 text-center">Your Quiz Questions</h3>
                     {questions.map((q, qIndex) => (
                         <div key={qIndex} className="mb-6 p-5 border border-gray-200 rounded-lg bg-white shadow-sm hover:shadow-md transition-shadow duration-200">
@@ -1215,13 +1108,6 @@ const App = () => {
 
             {questions.length > 0 && (
                 <div className="p-6 bg-gray-50 rounded-lg shadow-md">
-                    {/* Tabs for questions */}
-                    <QuestionTabs
-                        items={questions}
-                        currentIndex={0} // Final Test also doesn't have individual question navigation for now
-                        onSelectIndex={() => {}} // No-op for final test as it's a single scrollable list
-                        type="finalTest"
-                    />
                     <h3 className="text-2xl font-bold text-gray-800 mb-6 text-center">Your Final Test Questions</h3>
                     {questions.map((q, qIndex) => (
                         <div key={qIndex} className="mb-6 p-5 border border-gray-200 rounded-lg bg-white shadow-sm hover:shadow-md transition-shadow duration-200">
@@ -1360,37 +1246,22 @@ const App = () => {
             );
         }
 
-        return (
-            <>
-                {appPhase !== 'moduleSelect' && appPhase !== 'results' && currentModule && (
-                    <NavigationBar
-                        currentPhase={appPhase}
-                        onNavigate={handleNavigateToPhase}
-                        onGoHome={handleGoHome}
-                        currentModule={currentModule} // Pass currentModule to enable/disable navigation
-                    />
-                )}
-                {/* Render the specific phase content */}
-                {(() => {
-                    switch (appPhase) {
-                        case 'moduleSelect':
-                            return renderModuleSelect();
-                        case 'resources':
-                            return renderResourcesPhase();
-                        case 'assignment':
-                            return renderAssignmentPhase();
-                        case 'quiz':
-                            return renderQuizPhase();
-                        case 'finalTest':
-                            return renderFinalTestPhase();
-                        case 'results':
-                            return renderResultsPhase();
-                        default:
-                            return renderModuleSelect();
-                    }
-                })()}
-            </>
-        );
+        switch (appPhase) {
+            case 'moduleSelect':
+                return renderModuleSelect();
+            case 'resources':
+                return renderResourcesPhase();
+            case 'assignment':
+                return renderAssignmentPhase();
+            case 'quiz':
+                return renderQuizPhase();
+            case 'finalTest':
+                return renderFinalTestPhase();
+            case 'results':
+                return renderResultsPhase();
+            default:
+                return renderModuleSelect();
+        }
     };
 
     return (
